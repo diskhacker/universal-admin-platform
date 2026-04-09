@@ -15,7 +15,7 @@ export interface CreateUserInput {
 export interface UpdateUserInput {
   firstName?: string;
   lastName?: string;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
   status?: "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
   preferences?: Record<string, unknown>;
 }

@@ -3,7 +3,10 @@ import { NotFoundError, ConflictError, ForbiddenError } from "../../shared/error
 import { eventBus, Events } from "../../shared/events/index.js";
 import type { PaginationParams, PaginatedResult } from "../../shared/types/index.js";
 import { paginationToSkipTake } from "../../shared/utils/index.js";
-import type { Tenant, TenantStatus } from "@prisma/client";
+import { tenants } from "../../db/schema.js";
+
+type Tenant = typeof tenants.$inferSelect;
+type TenantStatus = "TRIAL" | "ACTIVE" | "SUSPENDED" | "CANCELLED";
 
 export interface UpdateTenantInput {
   name?: string;

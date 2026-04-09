@@ -45,7 +45,7 @@ export class AuditService {
 
     if (format === "csv") {
       const header = "timestamp,actor,action,resource_type,resource_id,ip_address\n";
-      const rows = logs.map((l) =>
+      const rows = logs.map((l: any) =>
         `${l.createdAt.toISOString()},${l.actor?.email || l.actorType},${l.action},${l.resourceType},${l.resourceId || ""},${l.ipAddress || ""}`
       ).join("\n");
       return header + rows;
