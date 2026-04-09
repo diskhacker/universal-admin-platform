@@ -1,15 +1,23 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
+import { eq } from "drizzle-orm";
+import {
+	products,
+	plans,
+	roleDefinitions,
+	notificationTemplates,
+} from "./schema.js";
+
 const client = postgres(
-	process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/sigops",
+	process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/uap",
 );
-const prisma = drizzle(client);
+const db = drizzle(client);
 
 async function seed() {
 	console.log("Seeding Universal Admin Platform...");
 
 	// ── Products ──
-	const products = [
+	const productData = [
 		{
 			name: "sigops",
 			displayName: "SigOps",
@@ -22,16 +30,19 @@ async function seed() {
 		{ name: "lifetra", displayName: "Lifetra", description: "Lifetra Platform" },
 	];
 
-	for (const p of products) {
-		const product = await prisma.product.upsert({
-			where: { name: p.name },
-			create: p,
-			update: { displayName: p.displayName, description: p.description },
-		});
+	for (const p of productData) {
+		const [product] = await db
+			.insert(products)
+			.values(p)
+			.onConflictDoUpdate({
+				target: products.name,
+				set: { displayName: p.displayName, description: p.description },
+			})
+			.returning();
 		console.log(`  Product: ${product.name}`);
 
 		// ── Plans per product ──
-		const plans = [
+		const planData = [
 			{
 				name: "starter",
 				displayName: "Starter",
@@ -70,20 +81,22 @@ async function seed() {
 			},
 		];
 
-		for (const plan of plans) {
-			await prisma.plan.upsert({
-				where: { productId_name: { productId: product.id, name: plan.name } },
-				create: { productId: product.id, ...plan },
-				update: {
-					displayName: plan.displayName,
-					priceMonthly: plan.priceMonthly,
-					priceYearly: plan.priceYearly,
-					limits: plan.limits,
-					features: plan.features,
-				},
-			});
+		for (const plan of planData) {
+			await db
+				.insert(plans)
+				.values({ productId: product.id, ...plan })
+				.onConflictDoUpdate({
+					target: [plans.productId, plans.name],
+					set: {
+						displayName: plan.displayName,
+						priceMonthly: plan.priceMonthly,
+						priceYearly: plan.priceYearly,
+						limits: plan.limits,
+						features: plan.features,
+					},
+				});
 		}
-		console.log(`    Plans: ${plans.map((p) => p.name).join(", ")}`);
+		console.log(`    Plans: ${planData.map((p) => p.name).join(", ")}`);
 
 		// ── System Roles per product ──
 		const roles = [
@@ -119,11 +132,13 @@ async function seed() {
 		];
 
 		for (const role of roles) {
-			await prisma.roleDefinition.upsert({
-				where: { productId_name: { productId: product.id, name: role.name } },
-				create: { productId: product.id, ...role },
-				update: { displayName: role.displayName, permissions: role.permissions },
-			});
+			await db
+				.insert(roleDefinitions)
+				.values({ productId: product.id, ...role })
+				.onConflictDoUpdate({
+					target: [roleDefinitions.productId, roleDefinitions.name],
+					set: { displayName: role.displayName, permissions: role.permissions },
+				});
 		}
 		console.log(`    Roles: ${roles.map((r) => r.name).join(", ")}`);
 
@@ -150,24 +165,32 @@ async function seed() {
 		];
 
 		for (const t of templates) {
-			await prisma.notificationTemplate.upsert({
-				where: {
-					productId_name_channel: { productId: product.id, name: t.name, channel: t.channel },
-				},
-				create: { productId: product.id, ...t },
-				update: { subject: t.subject, body: t.body },
-			});
+			await db
+				.insert(notificationTemplates)
+				.values({ productId: product.id, ...t })
+				.onConflictDoUpdate({
+					target: [
+						notificationTemplates.productId,
+						notificationTemplates.name,
+						notificationTemplates.channel,
+					],
+					set: { subject: t.subject, body: t.body },
+				});
 		}
 		console.log(`    Templates: ${templates.map((t) => t.name).join(", ")}`);
 	}
 
-	// ── Super Admin Role (global, not product-specific) ──
-	// Use the first product (sigops) as the anchor for super-admin
-	const sigops = await prisma.product.findUnique({ where: { name: "sigops" } });
+	// ── Super Admin Role (global, anchored to sigops product) ──
+	const [sigops] = await db
+		.select()
+		.from(products)
+		.where(eq(products.name, "sigops"))
+		.limit(1);
+
 	if (sigops) {
-		await prisma.roleDefinition.upsert({
-			where: { productId_name: { productId: sigops.id, name: "super_admin" } },
-			create: {
+		await db
+			.insert(roleDefinitions)
+			.values({
 				productId: sigops.id,
 				name: "super_admin",
 				displayName: "Super Admin",
@@ -180,9 +203,11 @@ async function seed() {
 					"super:tenants:delete",
 					"super:settings:write",
 				],
-			},
-			update: {},
-		});
+			})
+			.onConflictDoUpdate({
+				target: [roleDefinitions.productId, roleDefinitions.name],
+				set: {},
+			});
 		console.log("  Super Admin role created");
 	}
 
@@ -194,4 +219,4 @@ seed()
 		console.error(e);
 		process.exit(1);
 	})
-	.finally(() => prisma.$disconnect());
+	.finally(() => client.end());
